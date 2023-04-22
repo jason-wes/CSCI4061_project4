@@ -143,7 +143,7 @@ int write_http_response(int fd, const char *resource_path) {
             return -1;
         }
 
-        // read file data and write to TCP fd
+        // read file data and write to TCP fd in chunks
         while((bytes_read = read(file, buf, BUFSIZE)) > 0) {
             if(bytes_read == -1) {
                 perror("read");
@@ -161,14 +161,14 @@ int write_http_response(int fd, const char *resource_path) {
                 total_written += bytes_written;
             }
         }
-
-
-        // write in chunks
     } else {
         // file doesnt exist
         strcpy(http_response, "HTTP/1.0 404 Not Found\r\nContent-Length: 0\r\n\r\n");
         
-        write(fd, &http_response, strlen(http_response));
+        if(write(fd, http_response, strlen(http_response)) < 0) {
+            perror("write");
+            return -1;
+        }
     }
 
 

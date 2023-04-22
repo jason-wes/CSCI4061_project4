@@ -83,7 +83,6 @@ int main(int argc, char **argv) {
         if (client_fd == -1) {
             if (errno != EINTR) {
                 perror("accept");
-                // free (resource_name);
                 close(sock_fd);
                 return 1;
             } else {
@@ -95,7 +94,6 @@ int main(int argc, char **argv) {
         strcpy(resource_name, serve_dir);
         if(read_http_request(client_fd, resource_name) == -1) {
             perror("read_http");
-            // free(resource_name);
             close(client_fd);
             close(sock_fd);
             return 1;
@@ -103,13 +101,11 @@ int main(int argc, char **argv) {
 
         if(write_http_response(client_fd, resource_name) == -1) {
             perror("write_http");
-            // free(resource_name);
             close(client_fd);
             close(sock_fd);
             return 1;
         }
     }
-    // free(resource_name);
 
     // Don't forget cleanup - reached even if we had SIGINT
     if (close(sock_fd) == -1) {
