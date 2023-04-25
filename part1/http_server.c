@@ -32,7 +32,10 @@ int main(int argc, char **argv) {
     // Catch SIGINT so we can clean up properly
     struct sigaction sigact;
     sigact.sa_handler = handle_sigint;
-    sigfillset(&sigact.sa_mask);
+    if (sigfillset(&sigact.sa_mask) == -1) {
+        perror("sigfillset");
+        return 1;
+    }
     sigact.sa_flags = 0; // Note the lack of SA_RESTART
     if (sigaction(SIGINT, &sigact, NULL) == -1) {
         perror("sigaction");
@@ -91,7 +94,13 @@ int main(int argc, char **argv) {
         }
         
         
-        strcpy(resource_name, serve_dir);
+        if (strcpy(resource_name, serve_dir) == NULL) {
+            perror("strcpy");
+            close(client_fd);
+            close(sock_fd);
+            return 1;
+        }
+        
         if(read_http_request(client_fd, resource_name) == -1) {
             perror("read_http");
             close(client_fd);
