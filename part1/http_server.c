@@ -93,7 +93,6 @@ int main(int argc, char **argv) {
             }
         }
         
-        
         if (strcpy(resource_name, serve_dir) == NULL) {
             perror("strcpy");
             close(client_fd);
@@ -111,6 +110,12 @@ int main(int argc, char **argv) {
         if(write_http_response(client_fd, resource_name) == -1) {
             perror("write_http");
             close(client_fd);
+            close(sock_fd);
+            return 1;
+        }
+
+        if (close(client_fd) == -1) {
+            perror("close");
             close(sock_fd);
             return 1;
         }

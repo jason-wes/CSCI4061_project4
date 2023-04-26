@@ -170,9 +170,6 @@ int write_http_response(int fd, const char *resource_path) {
             return -1;
         }
     }
-
-
-
-    // TODO Not yet implemented
+    
     return 0;
 }

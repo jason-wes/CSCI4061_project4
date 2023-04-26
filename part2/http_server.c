@@ -23,40 +23,48 @@ void handle_sigint(int signo) {
     keep_going = 0;
 }
 
-int thread_func(connection_queue_t* queue) {
+void* thread_func(void* arg) {
     char resource_name[BUFSIZE];
+    int client_fd;
+    connection_queue_t* queue = (connection_queue_t *) arg;
 
+    // loop until we receive a shutdown
+    // dequeue a client fd, read its http request, and write back http response
     while(queue->shutdown != 1) {
-        int client_fd = connection_dequeue(queue); 
+        client_fd = connection_dequeue(queue);
         if(client_fd == -1) {
-            fprintf("connection_dequeue");
-            close(client_fd);
-            return 1;
+            if ((queue->shutdown) == 0) {
+                printf("connection_dequeue_error\n");
+            }
+            return NULL;
         }
 
+        // gets the correct directory for file requests
         if (strcpy(resource_name, serve_dir) == NULL) {
             perror("strcpy");
             close(client_fd);
-            close(sock_fd);
-            return 1;
+            return NULL;
         }
         
         if(read_http_request(client_fd, resource_name) == -1) {
             perror("read_http");
             close(client_fd);
-            close(sock_fd);
-            return 1;
+            return NULL;
         } // serve_dir/resource_name
 
         if(write_http_response(client_fd, resource_name) == -1) {
             perror("write_http");
             close(client_fd);
-            close(sock_fd);
-            return 1;
+            return NULL;
+        }
+
+        if(close(client_fd) == -1) {
+            perror("close");
+            return NULL;
         }
     }
-
-    return 0;
+    
+    return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -65,14 +73,13 @@ int main(int argc, char **argv) {
         printf("Usage: %s <directory> <port>\n", argv[0]);
         return 1;
     }
-    // Uncomment the lines below to use these definitions:
     serve_dir = argv[1];
     const char *port = argv[2];
 
     // Initialize thread-safe data struct
     connection_queue_t queue;
     if (connection_queue_init(&queue) != 0) {
-        fprintf(stderr, "Failed to initialize queue\n");
+        printf("Failed to initialize queue\n");
         return 1;
     }
     
@@ -132,9 +139,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Create thread pool TODO
-    pthread_t pool[N_THREADS];
-
     // sigprocmask to block ALL signals, save current mask
     sigset_t new_mask;
     sigset_t old_mask;
@@ -150,6 +154,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // Create thread pool
+    // We want to use a return code and set it for any proceeding error handling 
+    // from here so we can reuse cleanup logic 
+    pthread_t pool[N_THREADS];
+    int result;
+    int return_code = 0;
     for(int i = 0; i< N_THREADS; i++) {
         if ((result = pthread_create(pool + i, NULL, thread_func, &queue)) != 0) {
             fprintf(stderr, "pthread_create: %s\n", strerror(result));
@@ -160,23 +170,19 @@ int main(int argc, char **argv) {
     // restore old mask
     if(sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
         perror("sigprocmask");
-        connection_queue_free(&queue);
-        close(sock_fd);
-        return 1;
+        keep_going = 0;
+        return_code = 1;
     }
 
-    // Accept loop here WIP
-    char resource_name[BUFSIZE];
+    // Accept loop here 
     while (keep_going != 0) {
         // Wait to receive a connection request from client
-        // Don't both saving client address information
         int client_fd = accept(sock_fd, NULL, NULL);
         if (client_fd == -1) {
             if (errno != EINTR) {
                 perror("accept");
-                connection_queue_free(&queue);
-                close(sock_fd);
-                return 1;
+                return_code = 1;
+                break;
             } else {
                 break;
             }
@@ -184,25 +190,23 @@ int main(int argc, char **argv) {
         
         // add new client fd to queue. may block (okay)
         if(connection_enqueue(&queue, client_fd) == -1) {
-            fprintf("Connection_enqueue error\n");
-            connection_queue_free(&queue);
-            close(client_fd);
-            return 1;
+            if (queue.shutdown == 0) {
+                printf("Connection_enqueue error\n");
+                return_code = 1;
+            }
+            break;
         } 
-
-        // close(client_fd) ? 
         
-        // main thread no longer communicates with the new client
+        // main thread no longer communicates with the new client as in Part 1.
     }
 
-    // Don't forget cleanup - reached even if we had SIGINT
+    // Cleanup, even if we had SIGINT: shutdown, wait for threads, free
     if (connection_queue_shutdown(&queue) == -1) {
-        fprintf("Connection_queue_shutdown error\n");
-        close(sock_fd);
-        connection_queue_free(&queue);
-        return 1;
+        printf("Connection_queue_shutdown error\n");
+        return_code = 1;
     }
 
+    // wait for threads to terminate
     for (int i = 0; i < N_THREADS; i++) {
         int result = pthread_join(pool[i], NULL);
         if (result != 0) {
@@ -210,21 +214,20 @@ int main(int argc, char **argv) {
             for (int j = i + 1; j < N_THREADS; j++) {
                 pthread_join(pool[j], NULL);
             }
-            return 1;
+            return_code = 1;
         }
     }
 
     if (connection_queue_free(&queue) == -1) {
-        fprintf("Connection_queue_free error\n");
-        close(sock_fd);
-        return 1;
+        printf("Connection_queue_free error\n");
+        return_code = 1;
     } 
 
     if (close(sock_fd) == -1) {
         perror("close");
-        return 1;
+        return_code = 1;
     }
 
     // TODO Complete the rest of this function
-    return 0;
+    return return_code;
 }
